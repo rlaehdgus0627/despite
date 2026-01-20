@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 
 class LIPDBabelv1(torch.utils.data.Dataset):
-    def __init__(self, sequences, sequences_babel_train, sequences_babel_val, num_frames=24, augment=True, train=True, modalities=["pc", "imu", "skeleton", "text"]):
+    def __init__(self, sequences, sequences_babel_train, sequences_babel_val, num_frames=24, augment=True, train=True, modalities=["pc", "imu", "skeleton", "text"], skeleton_source="gt_joint"):
         
 
         #### Testing occurs in separate modules so we dont explicitly do a train-test differentiaten here.
@@ -18,6 +18,7 @@ class LIPDBabelv1(torch.utils.data.Dataset):
             sets = ["eLIPD", "eTC", "eDIP"]
 
         self.T = num_frames
+        self.skeleton_source = skeleton_source
         ### Train on all data we can get from LIPD dataset.
         ### They have real and synthetic LiDAR-IMU data 
         ### where all IMUS are supposed to be on the same joint positions.
@@ -45,12 +46,16 @@ class LIPDBabelv1(torch.utils.data.Dataset):
         for k, v in self.dataset.items():
             
             windows_text = ["human activity"] # a general text embedding for all motions.
+            babel_seq = sequences_babel.get(k)
+            skeleton_seq = self._select_skeleton_sequence(v, babel_seq)
+            if skeleton_seq is None:
+                continue
             if k in sequences_babel:
                 windows_pcd, windows_imu, windows_smpl, windows_text = sliding_window_utils.preprocess_pointclouds_sliding_windows_all(v["PCD"], 
-                                v["IMU"], v["gt_joint"].reshape(-1, 24, 3), sequences_babel[k]["raw_text"], num_frames, with_labels=True, stride=1)
+                                v["IMU"], skeleton_seq, sequences_babel[k]["raw_text"], num_frames, with_labels=True, stride=1)
                 self.X_text.extend(windows_text)
             else:
-                windows_pcd, windows_imu, windows_smpl = sliding_window_utils.preprocess_sliding_windows(v["PCD"], v["IMU"], v["gt_joint"].reshape(-1, 24, 3), self.T, stride=1)
+                windows_pcd, windows_imu, windows_smpl = sliding_window_utils.preprocess_sliding_windows(v["PCD"], v["IMU"], skeleton_seq, self.T, stride=1)
                 self.X_text.extend(windows_text * len(windows_pcd))
             self.X_pcd.append(windows_pcd)
             self.X_imu.append(windows_imu)
@@ -100,6 +105,8 @@ class LIPDBabelv1(torch.utils.data.Dataset):
         return pc_sequence
 
     def augment_joints_sequence(self, joints_sequence):
+        if self.skeleton_source == "smpl_pose":
+            return self.add_gaussian_noise_joints(joints_sequence)
         rnd_scale_factor = torch.FloatTensor(1).uniform_(0.7, 1.5)
         rnd_translation = torch.FloatTensor(3).uniform_(-0.3, 0.3)
 
@@ -147,6 +154,12 @@ class LIPDBabelv1(torch.utils.data.Dataset):
         noise = torch.normal(mean=0, std=noise_std, size=joints_sequence.size())
         return joints_sequence + noise
 
+    def _select_skeleton_sequence(self, seq_dict, babel_seq=None):
+        if self.skeleton_source == "smpl_pose":
+            if babel_seq is None or "smpl_pose" not in babel_seq:
+                return None
+            return torch.as_tensor(babel_seq["smpl_pose"]).reshape(-1, 22, 3)
+        return torch.as_tensor(seq_dict["gt_joint"]).reshape(-1, 24, 3)
+
     def __len__(self):
         return len(self.X_pcd)
-

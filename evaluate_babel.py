@@ -110,6 +110,7 @@ if __name__ == "__main__":
     parser.add_argument('--projection', default="linear", type=str, help='which projection layer to use')
 
     parser.add_argument('--wandb', default=0, type=int, help='with wandb logging or no')
+    parser.add_argument('--skeleton_source', default="smpl_pose", choices=["gt_joint", "smpl_pose"], help='Skeleton source to use')
 
     input_args = parser.parse_args()
 
@@ -146,14 +147,16 @@ if __name__ == "__main__":
                                                 num_frames=input_args.n_frames, 
                                                 augment=True, 
                                                 train=True, 
-                                                modalities=[input_args.modality])
+                                                modalities=[input_args.modality],
+                                                skeleton_source=input_args.skeleton_source)
 
     dataset_test = lipd_babelv2.LIPDBabelv2CLS(seqs_with_labels_train, 
                                                 seqs_with_labels_val, 
                                                 num_frames=input_args.n_frames, 
                                                 augment=False, 
                                                 train=False, 
-                                                modalities=[input_args.modality])
+                                                modalities=[input_args.modality],
+                                                skeleton_source=input_args.skeleton_source)
 
     trainLoader = DataLoader(dataset_train, batch_size=input_args.batch_size, shuffle=True)
     testLoader = DataLoader(dataset_test, batch_size=input_args.batch_size, shuffle=False)
@@ -163,7 +166,7 @@ if __name__ == "__main__":
     load_pretrained = input_args.pretrained_path #models/clisaxa_75.pth"
 
     embed_dim = input_args.embed_dim
-    num_joints = 24
+    num_joints = 22 if input_args.skeleton_source == "smpl_pose" else 24
     n_feats = 3
     ##### MODELS - always the same, just init.
     skeleton = model_loader.load_skeleton_encoder(embed_dim, num_joints, n_feats, device="cuda") if "S" in model_type else None

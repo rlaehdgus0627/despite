@@ -10,7 +10,7 @@ from pandas.io.json._normalize import nested_to_record
 from os.path import join as ospj
 
 def load_babel():  
-    d_folder = '/data/BABEL/babel_v1.0_release'  # Data folder
+    d_folder = '/home/kdh/despite/data/BABEL/babel_v1.0_release'  # Data folder
     l_babel_dense_files = ['train', 'val', 'test']
     l_babel_extra_files = ['extra_train', 'extra_val']
 
@@ -69,7 +69,7 @@ def amass_poses_and_trans(bdata, body_model, joints_to_use):
     return joints[:, joints_to_use]
 
 
-def lipd_to_amass_id(lipd_id, m, data_root_path="/data/AMASS/"):
+def lipd_to_amass_id(lipd_id, m, data_root_path="/home/kdh/despite/data/AMASS/"):
     #data_root_path = "/data/AMASS/"
 
     if m == "ACCAD":
@@ -216,6 +216,7 @@ def get_babel_labels_and_amass_poses(seq_dataset, m, babel, babel_split="train",
         fps = data['poses'].shape[0] / duration_t
         poses, raw_text_lbl, proc_text_lbl, action_cat_lbl = get_babel_labels(data, babel_dict, fps, target_fps=target_fps)
         amass_poses[lipd_id] = poses
+        smpl_pose = poses[:, :66]
         raw_text_labels[lipd_id] = raw_text_lbl
         proc_text_labels[lipd_id] = proc_text_lbl
         action_cat_labels[lipd_id] = action_cat_lbl
@@ -223,6 +224,7 @@ def get_babel_labels_and_amass_poses(seq_dataset, m, babel, babel_split="train",
         ### Merge the labels with the LIPD dataset.
         if abs(len(poses) - len(lipd[lipd_id]["PCD"])) <= 2:  
             lipd[lipd_id]["amass_poses"] = poses[:len(lipd[lipd_id]["PCD"])]
+            lipd[lipd_id]["smpl_pose"] = smpl_pose[:len(lipd[lipd_id]["PCD"])]
             lipd[lipd_id]["raw_text"] = raw_text_lbl[:len(lipd[lipd_id]["PCD"])] # not sure how offsync they are
             lipd[lipd_id]["proc_text"] = proc_text_lbl[:len(lipd[lipd_id]["PCD"])] # not sure how offsync they are but thats the best we can do.
             lipd[lipd_id]["action_cat"] = action_cat_lbl[:len(lipd[lipd_id]["PCD"])]
@@ -242,9 +244,9 @@ def get_babel_labels_and_amass_poses(seq_dataset, m, babel, babel_split="train",
 if __name__ == "__main__":
     # Load Babel
 
-    data_root = "/data"
-    d_folder = '/data/BABEL/babel_v1.0_release' # Data folder for babel
-    amass_data_root_path = "/data/AMASS"
+    data_root = "/home/kdh/despite/data"
+    d_folder = '/home/kdh/despite/data/BABEL/babel_v1.0_release' # Data folder for babel
+    amass_data_root_path = "/home/kdh/despite/data/AMASS"
 
     l_babel_dense_files = ['train', 'val', 'test']  
     l_babel_extra_files = ['extra_train', 'extra_val']

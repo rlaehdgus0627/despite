@@ -8,7 +8,7 @@ from src.dataset import babel
 
 #### For representation learning
 class LIPDBabelv2(torch.utils.data.Dataset):
-    def __init__(self, sequences, sequences_babel_train, sequences_babel_val, num_frames=24, augment=False, train=True, modalities=["pc", "imu", "skeleton", "text"]):
+    def __init__(self, sequences, sequences_babel_train, sequences_babel_val, num_frames=24, augment=False, train=True, modalities=["pc", "imu", "skeleton", "text"], skeleton_source="gt_joint"):
         
         ## Here we train on all and only leave out the test set of Babel
         sets = ["ACCAD", "BMLmovi", "CMU", "eTC", "LIPD_train", "AIST", "eLIPD", "eDIP"]
@@ -18,6 +18,7 @@ class LIPDBabelv2(torch.utils.data.Dataset):
         #else:
         #    sets = []
         self.T = num_frames
+        self.skeleton_source = skeleton_source
         ### Train on all data we can get from LIPD dataset.
         ### They have real and synthetic LiDAR-IMU data 
         ### where all IMUS are supposed to be on the same joint positions.
@@ -52,6 +53,10 @@ class LIPDBabelv2(torch.utils.data.Dataset):
             #### Filter out the sequences from ACCAD, BMLmovi, CMU, and TC that are in train and val set.
 
             windows_text = ["human activity"] # a general text embedding for all motions, we dont count them during training.
+            babel_seq = self.sequences_babel.get(k)
+            skeleton_seq = self._select_skeleton_sequence(v, babel_seq)
+            if skeleton_seq is None:
+                continue
             if k in self.sequences_babel:
 
                 text_label_type = ""
@@ -61,7 +66,7 @@ class LIPDBabelv2(torch.utils.data.Dataset):
                     text_label_type = "action_cat" ## test with the categories for retrieval.
 
                 windows_pcd, windows_imu, windows_smpl, windows_text = sliding_window_utils.preprocess_pointclouds_sliding_windows_all(v["PCD"], 
-                                v["IMU"], v["gt_joint"].reshape(-1, 24, 3), self.sequences_babel[k][text_label_type], num_frames, with_labels=True, stride=1)
+                                v["IMU"], skeleton_seq, self.sequences_babel[k][text_label_type], num_frames, with_labels=True, stride=1)
                 
                 self.X_text.extend(windows_text)
                 self.X_pcd.append(windows_pcd)
@@ -73,7 +78,7 @@ class LIPDBabelv2(torch.utils.data.Dataset):
 
                 if train:
                     if k.startswith("LIPD_train") or k.startswith("eLIPD") or k.startswith("AIST") or k.startswith("eDIP"):
-                        windows_pcd, windows_imu, windows_smpl = sliding_window_utils.preprocess_sliding_windows(v["PCD"], v["IMU"], v["gt_joint"].reshape(-1, 24, 3), self.T, stride=1)
+                        windows_pcd, windows_imu, windows_smpl = sliding_window_utils.preprocess_sliding_windows(v["PCD"], v["IMU"], skeleton_seq, self.T, stride=1)
 
                         self.X_text.extend(windows_text * len(windows_pcd))
                         self.X_pcd.append(windows_pcd)
@@ -141,6 +146,8 @@ class LIPDBabelv2(torch.utils.data.Dataset):
         return pc_sequence
 
     def augment_joints_sequence(self, joints_sequence):
+        if self.skeleton_source == "smpl_pose":
+            return self.add_gaussian_noise_joints(joints_sequence)
         rnd_scale_factor = torch.FloatTensor(1).uniform_(0.7, 1.5)
         rnd_translation = torch.FloatTensor(3).uniform_(-0.3, 0.3)
 
@@ -188,13 +195,20 @@ class LIPDBabelv2(torch.utils.data.Dataset):
         noise = torch.normal(mean=0, std=noise_std, size=joints_sequence.size())
         return joints_sequence + noise
 
+    def _select_skeleton_sequence(self, seq_dict, babel_seq=None):
+        if self.skeleton_source == "smpl_pose":
+            if babel_seq is None or "smpl_pose" not in babel_seq:
+                return None
+            return torch.as_tensor(babel_seq["smpl_pose"]).reshape(-1, 22, 3)
+        return torch.as_tensor(seq_dict["gt_joint"]).reshape(-1, 24, 3)
+
     def __len__(self):
         return len(self.X_pcd)
 
 
 ### For classification
 class LIPDBabelv2CLS(torch.utils.data.Dataset):
-    def __init__(self, sequences_babel_train, sequences_babel_val, babel_v=120, num_frames=24, augment=False, train=True, modalities=["pc", "imu", "skeleton", "text"]):
+    def __init__(self, sequences_babel_train, sequences_babel_val, babel_v=120, num_frames=24, augment=False, train=True, modalities=["pc", "imu", "skeleton", "text"], skeleton_source="gt_joint"):
         # in both subsets...
         sets = ["ACCAD", "BMLmovi", "CMU", "eTC"]
         #if train:
@@ -202,6 +216,7 @@ class LIPDBabelv2CLS(torch.utils.data.Dataset):
         #else:
         #    sets = []
         self.T = num_frames
+        self.skeleton_source = skeleton_source
         ### Train on all data we can get from LIPD dataset.
         ### They have real and synthetic LiDAR-IMU data 
         ### where all IMUS are supposed to be on the same joint positions.
@@ -227,6 +242,8 @@ class LIPDBabelv2CLS(torch.utils.data.Dataset):
         self.action_to_idx_label = { a: i for a, i in babel.action_label_to_idx.items() if i < babel_v}
 
         for k, v in sequences_babel.items():
+            if self.skeleton_source == "smpl_pose" and "smpl_pose" not in v:
+                continue
 
             text_label_type = "raw_text"
             #if train:
@@ -235,8 +252,9 @@ class LIPDBabelv2CLS(torch.utils.data.Dataset):
             #    text_label_type = "action_cat" ## test with the categories for retrieval.
             if len(v["PCD"]) >= self.T:
                 #print(len(v["PCD"]))
+                skeleton_seq = self._select_skeleton_sequence(v)
                 windows_pcd, windows_imu, windows_smpl, windows_text = sliding_window_utils.preprocess_pointclouds_sliding_windows_all_babel(v["PCD"], 
-                            v["IMU"], v["gt_joint"].reshape(-1, 24, 3), v[text_label_type], num_frames, self.action_to_idx_label, with_labels=True, stride=1)
+                            v["IMU"], skeleton_seq, v[text_label_type], num_frames, self.action_to_idx_label, with_labels=True, stride=1)
 
                 self.X_text.extend(windows_text)
                 self.X_pcd.append(windows_pcd)
@@ -308,6 +326,8 @@ class LIPDBabelv2CLS(torch.utils.data.Dataset):
         return pc_sequence
 
     def augment_joints_sequence(self, joints_sequence):
+        if self.skeleton_source == "smpl_pose":
+            return self.add_gaussian_noise_joints(joints_sequence)
         rnd_scale_factor = torch.FloatTensor(1).uniform_(0.7, 1.5)
         rnd_translation = torch.FloatTensor(3).uniform_(-0.3, 0.3)
 
@@ -355,6 +375,10 @@ class LIPDBabelv2CLS(torch.utils.data.Dataset):
         noise = torch.normal(mean=0, std=noise_std, size=joints_sequence.size())
         return joints_sequence + noise
 
+    def _select_skeleton_sequence(self, seq_dict):
+        if self.skeleton_source == "smpl_pose":
+            return torch.as_tensor(seq_dict["smpl_pose"]).reshape(-1, 22, 3)
+        return torch.as_tensor(seq_dict["gt_joint"]).reshape(-1, 24, 3)
+
     def __len__(self):
         return len(self.X_pcd)
-

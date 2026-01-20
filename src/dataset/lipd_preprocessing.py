@@ -45,7 +45,7 @@ def prepare_imu(imu_input, imu_acc):
 
 def load_lipd_data(m, datas, num_points=256):
     #m = "eTC"
-    root_dataset_path = "/data/LIPD/LIPD"
+    root_dataset_path = "/home/kdh/despite/data/LIPD/LIPD"
     subjects = {}
     #num_points = 256
     for data in tqdm(datas):
@@ -101,7 +101,7 @@ def load_lipd_data(m, datas, num_points=256):
 
     return test_subj_dataset
 
-def prepare_lipd(root_dataset_path = "/data/LIPD/LIPD/", num_points=256):
+def prepare_lipd(root_dataset_path = "/home/kdh/despite/data/LIPD/LIPD/", num_points=256):
     ### Load each sequence
     testsets = ["eLIPD", "eTC", "eDIP"]
     trainsets = ["ACCAD", "BMLmovi", "LIPD_train", "AIST", "CMU"]
@@ -146,11 +146,11 @@ def prepare_lipd(root_dataset_path = "/data/LIPD/LIPD/", num_points=256):
     return sequence_datasets
 
 if __name__ == "__main__":
-    root_dataset_path = "/data/LIPD/LIPD/" # set your path to LIPD dataset here 
+    root_dataset_path = "/home/kdh/despite/data/LIPD/LIPD/" # set your path to LIPD dataset here 
     num_points = 256 # specificy number of LiDAR points here, we use 256 in the paper
     sequence_datasets = prepare_lipd()
 
     # save to pkl
-    save_path = "/data/LIPD/LIPD_SEQUENCES_256p_TEST.pkl"
+    save_path = "/home/kdh/despite/data/LIPD/LIPD_SEQUENCES_256p.pkl"
     with open(save_path, "wb") as f:
         pickle.dump(sequence_datasets, f)

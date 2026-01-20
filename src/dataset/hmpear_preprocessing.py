@@ -109,7 +109,7 @@ if __name__ == "__main__":
 
     ### TRAIN
     print("preprocessing HMPEAR train")
-    with open('/data/HMPEAR/label/label/train_act.pkl', 'rb') as f:
+    with open('/home/kdh/despite/data/HMPEAR/label/label/train_act.pkl', 'rb') as f:
         data = pkl.load(f)
     
     X_train = []
@@ -139,7 +139,7 @@ if __name__ == "__main__":
 
     ### TEST
     print("preprocessing HMPEAR train")
-    with open('/data/HMPEAR/label/label/test_act.pkl', 'rb') as f:
+    with open('/home/kdh/despite/data/HMPEAR/label/label/test_act.pkl', 'rb') as f:
         data = pkl.load(f)
 
     X_test = []
