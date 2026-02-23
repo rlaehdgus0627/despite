@@ -32,6 +32,19 @@ def load_skeleton_encoder(embed_dim, n_joints, n_feats, device="cuda"):
     smpl_model = Encoder_TRANSFORMER(**parameters).to(device)
     return smpl_model
 
+def load_smpl_pose_encoder(embed_dim, n_joints, device="cuda", backbone="transformer"):
+    if backbone == "transformer":
+        smpl_pose_model = Models.SMPLPoseEncoder(embed_dim, n_joints, device=device).to(device)
+    elif backbone == "tcn":
+        smpl_pose_model = Models.SMPLPoseEncoderTCN(embed_dim, n_joints).to(device)
+    elif backbone == "conformer":
+        smpl_pose_model = Models.SMPLPoseEncoderConformer(embed_dim, n_joints).to(device)
+    elif backbone == "stgcn":
+        smpl_pose_model = Models.SMPLPoseEncoderSTGCN(embed_dim, n_joints).to(device)
+    else:
+        raise ValueError(f"Unknown SMPL pose encoder backbone: {backbone}")
+    return smpl_pose_model
+
 def load_smpl_encoder(embed_dim, n_joints, n_feats, device="cuda"):
     #MOTIONCLIP params
 

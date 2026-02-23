@@ -22,6 +22,26 @@ def loss_fn_generator(x, x_hat):
     loss = F.mse_loss(x, x_hat, reduction='mean')
     return loss
 
+def axis_angle_to_rot6d(axis_angle: torch.Tensor) -> torch.Tensor:
+    angle = torch.norm(axis_angle, dim=-1)
+    axis = axis_angle / (angle[..., None] + 1e-8)
+    x, y, z = axis.unbind(-1)
+    zeros = torch.zeros_like(x)
+    K = torch.stack(
+        [
+            zeros, -z, y,
+            z, zeros, -x,
+            -y, x, zeros,
+        ],
+        dim=-1,
+    ).reshape(axis.shape[:-1] + (3, 3))
+    eye = torch.eye(3, device=axis.device, dtype=axis.dtype).expand(axis.shape[:-1] + (3, 3))
+    cos = torch.cos(angle)[..., None, None]
+    sin = torch.sin(angle)[..., None, None]
+    outer = axis[..., :, None] * axis[..., None, :]
+    rot = cos * eye + (1.0 - cos) * outer + sin * K
+    rot6d = rot[..., :2].reshape(axis_angle.shape[:-1] + (6,))
+    return rot6d
 
 def forward_with_kwargs(model, batch):
     """
@@ -47,7 +67,7 @@ def forward_with_kwargs(model, batch):
     return model(**model_kwargs)
 
 
-def train_with_clip(model, clip_model, loss_fun, data_loader, epochs, optimizer, scheduler, modalities, with_generator=False, with_wandb=False):
+def train_with_clip(model, clip_model, loss_fun, data_loader, epochs, optimizer, scheduler, modalities, with_generator=False, with_wandb=False, skeleton_source="gt_joint"):
 
     # needed for loss computation
     
@@ -123,11 +143,14 @@ def train_with_clip(model, clip_model, loss_fun, data_loader, epochs, optimizer,
 
             if with_generator:
                 loss_generator = 0
+                target_skel = batch["batch_skeleton"].to("cuda")
+                if skeleton_source == "gt_pose":
+                    target_skel = axis_angle_to_rot6d(target_skel)
                 for m in modalities:
                     if m != "text":
                         #print(batch["batch_skeleton"].to("cuda").shape)
                         #print(out["gen_%s" % m].shape)
-                        loss_temp = loss_fn_generator(batch["batch_skeleton"].to("cuda"), out["gen_%s" % m])
+                        loss_temp = loss_fn_generator(target_skel, out["gen_%s" % m])
                         loss_generator += loss_temp
                         loss_tracker["%s_gen" % m] = loss_temp.item()
                 #loss_imu_gen = loss_generator(skeleton, out["gen_imu"])
@@ -364,9 +387,11 @@ if __name__ == "__main__":
     parser.add_argument('--modalities', nargs='+', help='List of modalities', required=True)
     parser.add_argument('--with_generator', default=0, type=int, help='with skeleton generator')
     parser.add_argument('--wandb', default=0, type=int, help='with wandb logging or no')
-    parser.add_argument('--skeleton_source', default="smpl_pose", choices=["gt_joint", "smpl_pose"], help='Skeleton source to use')
+    parser.add_argument('--skeleton_source', default="gt_joint", choices=["gt_joint", "gt_pose", "gt_pose_joints"], help='Skeleton source to use')
+    parser.add_argument('--smpl_backbone', default="transformer", choices=["transformer", "tcn", "conformer", "stgcn"], help='SMPL pose encoder backbone (used when skeleton_source=gt_pose)')
 
     parser.add_argument('--dataset', default="v1", type=str, help='Which dataset to use')
+    parser.add_argument('--sequence_pkl', default="/home/kdh/despite/data/LIPD/LIPD_SEQUENCES_256p.pkl", type=str, help='Path to LIPD_SEQUENCES_256p.pkl')
     input_args = parser.parse_args()
 
     ### Embed dim when using text MUST be 512
@@ -396,11 +421,22 @@ if __name__ == "__main__":
             p.requires_grad = False
 
     embed_dim = input_args.embed_dim
-    num_joints = 22 if input_args.skeleton_source == "smpl_pose" else 24
-    n_feats = 3 # keep this the same because we have only one dataset.
+    num_joints = 24
+    n_feats = 6 if input_args.skeleton_source == "gt_pose" else 3
     
     ### Load all models, feed into binder model for training later.
-    skeleton = model_loader.load_skeleton_encoder(embed_dim, num_joints, n_feats, device="cuda") if "skeleton" in modalities else None
+    if "skeleton" in modalities:
+        if input_args.skeleton_source == "gt_pose":
+            skeleton = model_loader.load_smpl_pose_encoder(
+                embed_dim,
+                num_joints,
+                device="cuda",
+                backbone=input_args.smpl_backbone,
+            )
+        else:
+            skeleton = model_loader.load_skeleton_encoder(embed_dim, num_joints, n_feats, device="cuda")
+    else:
+        skeleton = None
     imu = model_loader.load_imu_encoder(embed_dim, device="cuda") if "imu" in modalities else None
     pc = model_loader.load_pst_transformer(embed_dim, device="cuda") if "pc" in modalities else None
     skeleton_gen = model_loader.load_skeleton_generator(embed_dim, num_joints, n_feats, device="cuda") if input_args.with_generator else None
@@ -415,7 +451,7 @@ if __name__ == "__main__":
     with open("/home/kdh/despite/data/LIPD/lipd_babel_annotations_VALGITHUBTEST.pkl", "rb") as f:
         seqs_with_labels_val = pickle.load(f)
 
-    with open('/home/kdh/despite/data/LIPD/LIPD_SEQUENCES_256p.pkl', 'rb') as f:
+    with open(input_args.sequence_pkl, 'rb') as f:
         sequence_datasets = pickle.load(f)
 
     #### Dataset
@@ -474,6 +510,6 @@ if __name__ == "__main__":
                 "with_generator" : input_args.with_generator
                                         })
     if "text" in modalities:
-        train_with_clip(binder, clip_model, loss_fun, data_loader, input_args.epochs, optimizer, scheduler, modalities, input_args.with_generator, with_wandb)
+        train_with_clip(binder, clip_model, loss_fun, data_loader, input_args.epochs, optimizer, scheduler, modalities, input_args.with_generator, with_wandb, input_args.skeleton_source)
     else:
         train_without_clip(binder, loss_fun, data_loader, input_args.epochs, optimizer, scheduler, modalities, input_args.with_generator, with_wandb)

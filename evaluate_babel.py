@@ -110,7 +110,8 @@ if __name__ == "__main__":
     parser.add_argument('--projection', default="linear", type=str, help='which projection layer to use')
 
     parser.add_argument('--wandb', default=0, type=int, help='with wandb logging or no')
-    parser.add_argument('--skeleton_source', default="smpl_pose", choices=["gt_joint", "smpl_pose"], help='Skeleton source to use')
+    parser.add_argument('--skeleton_source', default="gt_joint", choices=["gt_joint", "gt_pose"], help='Skeleton source to use')
+    parser.add_argument('--smpl_backbone', default="transformer", choices=["transformer", "tcn", "conformer", "stgcn"], help='SMPL pose encoder backbone (used when skeleton_source=gt_pose)')
 
     input_args = parser.parse_args()
 
@@ -166,10 +167,21 @@ if __name__ == "__main__":
     load_pretrained = input_args.pretrained_path #models/clisaxa_75.pth"
 
     embed_dim = input_args.embed_dim
-    num_joints = 22 if input_args.skeleton_source == "smpl_pose" else 24
-    n_feats = 3
+    num_joints = 24
+    n_feats = 6 if input_args.skeleton_source == "gt_pose" else 3
     ##### MODELS - always the same, just init.
-    skeleton = model_loader.load_skeleton_encoder(embed_dim, num_joints, n_feats, device="cuda") if "S" in model_type else None
+    if "S" in model_type:
+        if input_args.skeleton_source == "gt_pose":
+            skeleton = model_loader.load_smpl_pose_encoder(
+                embed_dim,
+                num_joints,
+                device="cuda",
+                backbone=input_args.smpl_backbone,
+            )
+        else:
+            skeleton = model_loader.load_skeleton_encoder(embed_dim, num_joints, n_feats, device="cuda")
+    else:
+        skeleton = None
     imu = model_loader.load_imu_encoder(embed_dim, device="cuda") if "I" in model_type else None
     pc = model_loader.load_pst_transformer(embed_dim, device="cuda") if "P" in model_type else None
     skeleton_gen = model_loader.load_skeleton_generator(embed_dim, num_joints, n_feats, device="cuda") if "Gen" in model_type else None

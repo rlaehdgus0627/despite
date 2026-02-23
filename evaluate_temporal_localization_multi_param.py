@@ -31,6 +31,8 @@ if __name__ == "__main__":
     parser.add_argument('--src_modality', default='imu', type=str, help='Source modality that must be matched to one out of N-targets')
     parser.add_argument('--tgt_modality', default='pc', type=str, help='Target modality that serves as matching candidates')
     parser.add_argument('--embed_dim', default=128, type=int, help='Embedding dim of the model')
+    parser.add_argument('--skeleton_source', default="gt_joint", choices=["gt_joint", "gt_pose"], help='Skeleton source to use')
+    parser.add_argument('--smpl_backbone', default="transformer", choices=["transformer", "tcn", "conformer", "stgcn"], help='SMPL pose encoder backbone (used when skeleton_source=gt_pose)')
     input_args = parser.parse_args()
     
     seed = 1337
@@ -51,15 +53,26 @@ if __name__ == "__main__":
 
     #### Load models
     embed_dim = input_args.embed_dim
-    num_joints = 24 # keep this the same because we have only one dataset.
-    n_feats = 3 # keep this the same because we have only one dataset.
+    num_joints = 24
+    n_feats = 6 if input_args.skeleton_source == "gt_pose" else 3
 
     # map to modalities based on modeltype
     modalities = [model_type_to_modalities[m].lower() for m in input_args.model_type if not m in ["E", "T"]]
     print(modalities)
 
     ### Load all models, feed into binder model for training later.
-    skeleton = model_loader.load_skeleton_encoder(embed_dim, num_joints, n_feats, device="cuda") if "skeleton" in modalities else None
+    if "skeleton" in modalities:
+        if input_args.skeleton_source == "gt_pose":
+            skeleton = model_loader.load_smpl_pose_encoder(
+                embed_dim,
+                num_joints,
+                device="cuda",
+                backbone=input_args.smpl_backbone,
+            )
+        else:
+            skeleton = model_loader.load_skeleton_encoder(embed_dim, num_joints, n_feats, device="cuda")
+    else:
+        skeleton = None
     imu = model_loader.load_imu_encoder(embed_dim, device="cuda") if "imu" in modalities else None
     pc = model_loader.load_pst_transformer(embed_dim, device="cuda") if "pc" in modalities else None
     skeleton_gen = None #model_loader.load_skeleton_generator(embed_dim, num_joints, n_feats, device="cuda") if input_args.with_generator else None
@@ -78,7 +91,7 @@ if __name__ == "__main__":
     print("Encoding data.")
     test_subj_datasets = {}
     for m in ["eLIPD", "eTC", "eDIP"]:
-        test_subj_dataset = matching.encode_all(sequence_datasets[m], model, window_length=24, model_type=input_args.model_type)
+        test_subj_dataset = matching.encode_all(sequence_datasets[m], model, window_length=24, model_type=input_args.model_type, skeleton_source=input_args.skeleton_source)
         test_subj_datasets[m] = test_subj_dataset
     
 

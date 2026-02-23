@@ -150,6 +150,7 @@ class Decoder_TRANSFORMER(nn.Module):
         
     def forward(self, batch, use_text_emb=False):
         z, y, mask = batch["z"], batch["y"], batch["mask"]
+        mask = mask.bool()
 
         latent_dim = z.shape[1]
         bs, nframes = mask.shape

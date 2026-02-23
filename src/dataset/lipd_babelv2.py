@@ -146,7 +146,7 @@ class LIPDBabelv2(torch.utils.data.Dataset):
         return pc_sequence
 
     def augment_joints_sequence(self, joints_sequence):
-        if self.skeleton_source == "smpl_pose":
+        if self.skeleton_source == "gt_pose":
             return self.add_gaussian_noise_joints(joints_sequence)
         rnd_scale_factor = torch.FloatTensor(1).uniform_(0.7, 1.5)
         rnd_translation = torch.FloatTensor(3).uniform_(-0.3, 0.3)
@@ -196,10 +196,12 @@ class LIPDBabelv2(torch.utils.data.Dataset):
         return joints_sequence + noise
 
     def _select_skeleton_sequence(self, seq_dict, babel_seq=None):
-        if self.skeleton_source == "smpl_pose":
-            if babel_seq is None or "smpl_pose" not in babel_seq:
-                return None
-            return torch.as_tensor(babel_seq["smpl_pose"]).reshape(-1, 22, 3)
+        if self.skeleton_source == "gt_pose":
+            return torch.as_tensor(seq_dict["gt"]).reshape(-1, 24, 3)
+        if self.skeleton_source == "gt_pose_joints":
+            if "gt_pose_joints" not in seq_dict:
+                raise KeyError("gt_pose_joints missing. Run scripts/convert_gt_pose_to_joints.py first.")
+            return torch.as_tensor(seq_dict["gt_pose_joints"]).reshape(-1, 24, 3)
         return torch.as_tensor(seq_dict["gt_joint"]).reshape(-1, 24, 3)
 
     def __len__(self):
@@ -242,9 +244,6 @@ class LIPDBabelv2CLS(torch.utils.data.Dataset):
         self.action_to_idx_label = { a: i for a, i in babel.action_label_to_idx.items() if i < babel_v}
 
         for k, v in sequences_babel.items():
-            if self.skeleton_source == "smpl_pose" and "smpl_pose" not in v:
-                continue
-
             text_label_type = "raw_text"
             #if train:
             #    text_label_type = "raw_text" ## train with specific labels
@@ -326,7 +325,7 @@ class LIPDBabelv2CLS(torch.utils.data.Dataset):
         return pc_sequence
 
     def augment_joints_sequence(self, joints_sequence):
-        if self.skeleton_source == "smpl_pose":
+        if self.skeleton_source == "gt_pose":
             return self.add_gaussian_noise_joints(joints_sequence)
         rnd_scale_factor = torch.FloatTensor(1).uniform_(0.7, 1.5)
         rnd_translation = torch.FloatTensor(3).uniform_(-0.3, 0.3)
@@ -376,8 +375,12 @@ class LIPDBabelv2CLS(torch.utils.data.Dataset):
         return joints_sequence + noise
 
     def _select_skeleton_sequence(self, seq_dict):
-        if self.skeleton_source == "smpl_pose":
-            return torch.as_tensor(seq_dict["smpl_pose"]).reshape(-1, 22, 3)
+        if self.skeleton_source == "gt_pose":
+            return torch.as_tensor(seq_dict["gt"]).reshape(-1, 24, 3)
+        if self.skeleton_source == "gt_pose_joints":
+            if "gt_pose_joints" not in seq_dict:
+                raise KeyError("gt_pose_joints missing. Run scripts/convert_gt_pose_to_joints.py first.")
+            return torch.as_tensor(seq_dict["gt_pose_joints"]).reshape(-1, 24, 3)
         return torch.as_tensor(seq_dict["gt_joint"]).reshape(-1, 24, 3)
 
     def __len__(self):

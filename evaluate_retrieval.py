@@ -332,6 +332,8 @@ if __name__ == "__main__":
     parser.add_argument('--src_modality', default='IMU', type=str, help='Source modality that must be matched to one out of N-targets')
     parser.add_argument('--tgt_modality', default='PCD', type=str, help='Target modality that serves as matching candidates')
     parser.add_argument('--embed_dim', default=128, type=int, help='Embedding dimension of the encoders')
+    parser.add_argument('--skeleton_source', default="gt_joint", choices=["gt_joint", "gt_pose"], help='Skeleton source to use')
+    parser.add_argument('--smpl_backbone', default="transformer", choices=["transformer", "tcn", "conformer", "stgcn"], help='SMPL pose encoder backbone (used when skeleton_source=gt_pose)')
 
     args = parser.parse_args()
     
@@ -351,9 +353,17 @@ if __name__ == "__main__":
     # models, params always the same..
     embed_dim = args.embed_dim
     num_joints = 24
-    n_feats = 3
+    n_feats = 6 if args.skeleton_source == "gt_pose" else 3
 
-    smpl = model_loader.load_smpl_encoder(embed_dim, num_joints, n_feats, device="cuda")
+    if args.skeleton_source == "gt_pose":
+        smpl = model_loader.load_smpl_pose_encoder(
+            embed_dim,
+            num_joints,
+            device="cuda",
+            backbone=args.smpl_backbone,
+        )
+    else:
+        smpl = model_loader.load_smpl_encoder(embed_dim, num_joints, n_feats, device="cuda")
     imu = model_loader.load_imu_encoder(embed_dim, device="cuda")
     pc = model_loader.load_pst_transformer(embed_dim, device="cuda")
     smpl_gen = model_loader.load_smpl_generator(embed_dim, num_joints, n_feats, device="cuda")
