@@ -29,21 +29,37 @@ def preprocess_sliding_windows(point_clouds, imu, smpl, window_length, stride=1)
     #print(windows[0])
     return torch.stack(windows_pcd), torch.stack(windows_imu), torch.stack(windows_smpl)
 
-def encode_all(test_subj_dataset, model, window_length=24, model_type="SPITE", normalize=True):
+def select_skeleton_sequence(seq_dict, skeleton_source="gt_joint"):
+    if skeleton_source == "gt_pose":
+        return seq_dict["gt"].reshape(-1, 24, 3)
+    if skeleton_source == "gt_pose_joints":
+        if "gt_pose_joints" not in seq_dict:
+            raise KeyError("gt_pose_joints missing. Run scripts/convert_gt_pose_to_joints.py first.")
+        return seq_dict["gt_pose_joints"].reshape(-1, 24, 3)
+    return seq_dict["gt_joint"].reshape(-1, 24, 3)
+
+def encode_all(test_subj_dataset, model, window_length=24, model_type="SPITE", normalize=True, skeleton_source="gt_joint"):
     # Input is a dictionary with dataset->subject->sequence->{values}
 
     # #1 transform each sequence into sliding windows of size w
     for subject in test_subj_dataset.keys():
+        skip_seqs = []
         for seq in test_subj_dataset[subject].keys():
 
             test_subj_dataset[subject][seq]["PC"] = test_subj_dataset[subject][seq]["PCD"]
             del test_subj_dataset[subject][seq]["PCD"]    
             #print(test_subj_dataset[subject][seq]["gt_joint"].reshape(-1, 24, 3).shape)
-            windows_pcs, windows_imus, windows_smpls = preprocess_sliding_windows(test_subj_dataset[subject][seq]["PC"], test_subj_dataset[subject][seq]["IMU"], test_subj_dataset[subject][seq]["gt_joint"].reshape(-1, 24, 3), window_length=window_length)
+            skeleton_seq = select_skeleton_sequence(test_subj_dataset[subject][seq], skeleton_source=skeleton_source)
+            if skeleton_seq is None:
+                skip_seqs.append(seq)
+                continue
+            windows_pcs, windows_imus, windows_smpls = preprocess_sliding_windows(test_subj_dataset[subject][seq]["PC"], test_subj_dataset[subject][seq]["IMU"], skeleton_seq, window_length=window_length)
             test_subj_dataset[subject][seq]["PC_W"] = windows_pcs
             test_subj_dataset[subject][seq]["IMU_W"] = windows_imus
             test_subj_dataset[subject][seq]["SKELETON_W"] = windows_smpls
-            test_subj_dataset[subject][seq]["SKELETON"] = test_subj_dataset[subject][seq]["gt_joint"].reshape(-1, 24, 3) #qq
+            test_subj_dataset[subject][seq]["SKELETON"] = skeleton_seq #qq
+        for seq in skip_seqs:
+            del test_subj_dataset[subject][seq]
 
     # #2 Encode each slinding window of each sequence of each subject
     for subject in test_subj_dataset.keys():
@@ -127,7 +143,22 @@ def create_augmented_scenes_with_windows(dataset, num_windows=3, window_size=30,
     Create augmented scenes with sliding windows for multiple-frame matching.
     """
     augmented_scenes = []
-    subjects = list(dataset.keys())
+    subjects = [s for s, seqs in dataset.items() if seqs]
+    if not subjects:
+        raise ValueError("No subjects with sequences. Check dataset content or skeleton_source.")
+
+    candidates = []
+    for subject in subjects:
+        for seq, seq_dict in dataset[subject].items():
+            src_embs = seq_dict.get("%s_EMBS" % src_modality)
+            tgt_embs = seq_dict.get("%s_EMBS" % tgt_modality)
+            if src_embs is None or tgt_embs is None:
+                continue
+            if len(tgt_embs) >= window_size and len(src_embs) >= window_size:
+                candidates.append((subject, seq))
+
+    if not candidates:
+        raise ValueError("No sequences with enough frames for window_size=%s." % window_size)
     
     for j in range(n_scenes):
         # Select distractors (one window from each distractor subject)
@@ -139,28 +170,24 @@ def create_augmented_scenes_with_windows(dataset, num_windows=3, window_size=30,
         # num_windows == num other subjects
         
         while len(match_windows_imu) < num_windows:
-            random_subject = random.choice(subjects)
-            #if random_subject != subject:
-            random_sequence = random.choice(list(dataset[random_subject].keys()))
+            random_subject, random_sequence = random.choice(candidates)
             random_lidar_embs = dataset[random_subject][random_sequence]["%s_EMBS" % tgt_modality]
             random_imu_embs = dataset[random_subject][random_sequence]["%s_EMBS" % src_modality]
 
-            random_gt_lidar_embs = dataset[random_subject][random_sequence]["%s_W"%tgt_modality]
-            random_gt_imu_embs = dataset[random_subject][random_sequence]["%s_W"%src_modality]
+            random_gt_lidar_embs = dataset[random_subject][random_sequence]["%s_W" % tgt_modality]
+            random_gt_imu_embs = dataset[random_subject][random_sequence]["%s_W" % src_modality]
 
-            # window_size == matching length
-            if len(random_lidar_embs) >= window_size:
-                start_idx_matchwindow = random.randint(0, len(random_lidar_embs) - window_size)
-                match_window_imu = random_imu_embs[start_idx_matchwindow:start_idx_matchwindow + window_size]
-                match_window_pcd = random_lidar_embs[start_idx_matchwindow:start_idx_matchwindow + window_size]
+            start_idx_matchwindow = random.randint(0, len(random_lidar_embs) - window_size)
+            match_window_imu = random_imu_embs[start_idx_matchwindow:start_idx_matchwindow + window_size]
+            match_window_pcd = random_lidar_embs[start_idx_matchwindow:start_idx_matchwindow + window_size]
 
-                match_gt_imu = random_gt_imu_embs[start_idx_matchwindow:start_idx_matchwindow + window_size]
-                match_gt_pcd = random_gt_lidar_embs[start_idx_matchwindow:start_idx_matchwindow + window_size]
+            match_gt_imu = random_gt_imu_embs[start_idx_matchwindow:start_idx_matchwindow + window_size]
+            match_gt_pcd = random_gt_lidar_embs[start_idx_matchwindow:start_idx_matchwindow + window_size]
 
-                match_gt_imus.append(match_gt_imu)
-                match_gt_pcds.append(match_gt_pcd)
-                match_windows_imu.append(match_window_imu)
-                match_windows_pcd.append(match_window_pcd)
+            match_gt_imus.append(match_gt_imu)
+            match_gt_pcds.append(match_gt_pcd)
+            match_windows_imu.append(match_window_imu)
+            match_windows_pcd.append(match_window_pcd)
 
 
         # Add to scene list
@@ -222,7 +249,6 @@ def eval_scenes(augmented_scenes, src_modality="IMU", tgt_modality="PC"):
             predicted_matches.append(best_match_index)
             sims.append(similarities)
 
-        results[j] = [predicted_matches, ground_truth]
+        results[j] = [predicted_matches, ground_truth, sims]
         j += 1
     return results
-
