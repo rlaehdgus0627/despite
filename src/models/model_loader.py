@@ -3,9 +3,14 @@ from types import SimpleNamespace
 import torch
 import clip
 
-# Model Imports
-import src.models.encoders as Models
 from src.models.motion_clip import Encoder_TRANSFORMER, Decoder_TRANSFORMER
+
+
+def _get_models():
+    # Lazy import to avoid loading point cloud CUDA extensions when unused.
+    import src.models.encoders as Models
+
+    return Models
 
 
 def load_smpl_generator(embed_dim, n_joints, n_feats, device="cuda"):
@@ -32,15 +37,18 @@ def load_skeleton_encoder(embed_dim, n_joints, n_feats, device="cuda"):
     smpl_model = Encoder_TRANSFORMER(**parameters).to(device)
     return smpl_model
 
-def load_smpl_pose_encoder(embed_dim, n_joints, device="cuda", backbone="transformer"):
+def load_smpl_pose_encoder(embed_dim, n_joints, device="cuda", backbone="transformer", smpl_cfg=None):
+    if smpl_cfg is None:
+        smpl_cfg = {}
+    Models = _get_models()
     if backbone == "transformer":
-        smpl_pose_model = Models.SMPLPoseEncoder(embed_dim, n_joints, device=device).to(device)
+        smpl_pose_model = Models.SMPLPoseEncoder(embed_dim, n_joints, device=device, **smpl_cfg).to(device)
     elif backbone == "tcn":
-        smpl_pose_model = Models.SMPLPoseEncoderTCN(embed_dim, n_joints).to(device)
+        smpl_pose_model = Models.SMPLPoseEncoderTCN(embed_dim, n_joints, **smpl_cfg).to(device)
     elif backbone == "conformer":
-        smpl_pose_model = Models.SMPLPoseEncoderConformer(embed_dim, n_joints).to(device)
+        smpl_pose_model = Models.SMPLPoseEncoderConformer(embed_dim, n_joints, **smpl_cfg).to(device)
     elif backbone == "stgcn":
-        smpl_pose_model = Models.SMPLPoseEncoderSTGCN(embed_dim, n_joints).to(device)
+        smpl_pose_model = Models.SMPLPoseEncoderSTGCN(embed_dim, n_joints, **smpl_cfg).to(device)
     else:
         raise ValueError(f"Unknown SMPL pose encoder backbone: {backbone}")
     return smpl_pose_model
@@ -62,6 +70,7 @@ def load_smpl_encoder(embed_dim, n_joints, n_feats, device="cuda"):
     return smpl_model
 
 def load_imu_encoder(embed_dim, device="cuda"):
+    Models = _get_models()
     imu_model = Models.IMUEncoder(input_size=48, hidden_size=embed_dim, num_layers=2, device=device).to(device)
     return imu_model
 
@@ -111,6 +120,7 @@ def parse_args():
     return parser
 
 def load_pst_transformer(embed_dim, device="cuda"):
+    Models = _get_models()
     #PST Transformer params
     parser = parse_args()
     args = {action.dest: action.default for action in parser._actions if action.default is not argparse.SUPPRESS}
